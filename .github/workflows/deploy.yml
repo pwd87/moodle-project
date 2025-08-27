@@ -1,68 +1,15 @@
-# ชื่อของ Workflow ที่จะแสดงในหน้า Actions ของ GitHub
 name: Build and Deploy to Server
 
-# กำหนดเงื่อนไขการรัน: รันเมื่อมีการ push ไปที่ branch 'main' หรือ 'develop'
 on:
   push:
-    branches:
-      - main
-      - develop
+    branches: [ "main", "develop" ]
 
 jobs:
-  # Job ที่ 1: Build และ Push Docker Image
-  build_and_push:
-    runs-on: ubuntu-latest # ระบุว่าให้รันบนเครื่องของ GitHub ที่เป็น Ubuntu
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          push: true
-          # ตั้งชื่อ Image ให้อยู่ในรูปแบบ ghcr.io/ชื่อ-user/ชื่อ-repo:sha-commit
-          tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
-
-  # Job ที่ 2: Deploy ไปยัง DEV Server
   deploy_to_dev:
-    needs: build_and_push # Job นี้จะรันต่อเมื่อ 'build_and_push' สำเร็จ
-    runs-on: ubuntu-latest
-    # เงื่อนไข: รัน Job นี้เฉพาะเมื่อ event เกิดขึ้นที่ branch 'develop' เท่านั้น
     if: github.ref == 'refs/heads/develop'
-    steps:
-      - name: Deploy to server via SSH
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.SERVER_IP }} # IP ของ Server จาก Secrets
-          username: idtc
-          key: ${{ secrets.SSH_PRIVATE_KEY }} # Private Key จาก Secrets
-          script: |
-            set -e
-            echo '🚀 Deploying to DEV Server'
-            cd /srv/moodle/dev
-            echo '1. Updating Image Tag in dev compose.yml'
-            sed -i 's|image:.*|image: ghcr.io/${{ github.repository }}:${{ github.sha }}|g' compose.yml
-            echo '2. Pulling the new image and restarting'
-            docker compose pull
-            docker compose up -d
-            echo '✅ Deployment to DEV finished!'
-
-  # Job ที่ 3: Deploy ไปยัง QAS Server
-  deploy_to_qas:
-    needs: build_and_push
     runs-on: ubuntu-latest
-    # เงื่อนไข: รัน Job นี้เฉพาะเมื่อ event เกิดขึ้นที่ branch 'main' เท่านั้น
-    if: github.ref == 'refs/heads/main'
     steps:
-      - name: Deploy to server via SSH
+      - name: Deploy to DEV via SSH
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.SERVER_IP }}
@@ -70,11 +17,24 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -e
-            echo '🚀 Deploying to QAS Server'
-            cd /srv/moodle/qas
-            echo '1. Updating Image Tag in qas compose.yml'
-            sed -i 's|image:.*|image: ghcr.io/${{ github.repository }}:${{ github.sha }}|g' compose.yml
-            echo '2. Pulling the new image and restarting'
+            cd /srv/moodle/dev
             docker compose pull
             docker compose up -d
-            echo '✅ Deployment to QAS finished!'
+            docker compose ps
+
+  deploy_to_qas:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to QAS via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: idtc
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd /srv/moodle/qas
+            docker compose pull
+            docker compose up -d
+            docker compose ps
